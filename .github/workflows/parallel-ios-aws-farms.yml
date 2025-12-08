@@ -1,0 +1,262 @@
+name: Parallel Device Farm CI IOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment'
+        required: true
+        default: 'uat'
+        type: choice
+        options: [ "uat", "staging", "prod" ]
+  push:
+    branches:
+      - paralleltdffrrrestrail # Or your target branch
+
+env:
+  # === 1. SET YOUR AWS/S3 VARIABLES ===
+  AWS_REGION: "eu-central-1" # Match your Device Farm ARNs
+  CODEBUILD_PROJECT_NAME: 'device-farm-runner-ios' # Your CodeBuild project name
+  AGGREGATOR_PROJECT_NAME: 'aggregated-device-test-ios' # Your new aggregator project
+  S3_BUCKET_NAME: 'test-reports.vertofx.dev' # Your S3 bucket
+  SLACK_SECRET_NAME: 'appium-automation-secrets'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # === Job 1: Discover suites and get a timestamp ===
+  discover-suites:
+    name: Discover Test Suites
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      timestamp: ${{ steps.set-timestamp.outputs.timestamp }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with: 
+          node-version: '20'
+          
+      - name: Generate timestamp
+        id: set-timestamp
+        run: |
+          TIMESTAMP=$(date '+%Y-%m-%d-%H-%M-%S')
+          echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
+          
+      - name: Discover test suites
+        id: set-matrix
+        run: |
+          # Use your real discovery script
+          MATRIX=$(node scripts/discover-test-suites.js matrix)
+          # MATRIX='{"include":[{"suite":{"name":"login"}},{"suite":{"name":"transaction"}}]}'
+          echo "Discovered matrix: ${MATRIX}"
+          echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
+
+  # === Job 2: Trigger per-suite runs in parallel ===
+  trigger-device-farm-runs:
+    name: Trigger Run for ${{ matrix.suite.name }}
+    runs-on: ubuntu-latest
+    needs: discover-suites
+    outputs:
+      build_id: ${{ steps.codebuild.outputs.build_id }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover-suites.outputs.matrix) }}
+      
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_NON_PROD_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_NON_PROD_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Trigger CodeBuild for ${{ matrix.suite.name }}
+        id: codebuild
+        run: |
+          SUITE_NAME="${{ matrix.suite.name }}"
+          SUITE_PATH="./tests/${SUITE_NAME}/**/*.js"
+
+          ENV_VARS=$(cat <<EOF
+          [
+            {"name":"TIMESTAMP", "value":"${{ needs.discover-suites.outputs.timestamp }}", "type":"PLAINTEXT"},
+            {"name":"ENV", "value":"${{ github.event.inputs.environment || 'uat' }}", "type":"PLAINTEXT"},
+            {"name":"GITHUB_SHA", "value":"${{ github.sha }}", "type":"PLAINTEXT"},
+            {"name":"BUCKET_NAME", "value":"${{ env.S3_BUCKET_NAME }}", "type":"PLAINTEXT"},
+            {"name":"TEST_SUITE_NAME", "value":"${SUITE_NAME}", "type":"PLAINTEXT"},
+            {"name":"TEST_SUITE_PATH", "value":"${SUITE_PATH}", "type":"PLAINTEXT"}
+          ]
+          EOF
+          )
+
+          BUILD_ID=$(aws codebuild start-build \
+            --project-name ${{ env.CODEBUILD_PROJECT_NAME }} \
+            --environment-variables-override "$ENV_VARS" \
+            --source-version ${{ github.sha }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'build.id' \
+            --output text)
+
+          echo "Started CodeBuild with ID: $BUILD_ID"
+          echo "build_id=${BUILD_ID}" >> $GITHUB_OUTPUT
+
+      - name: Persist build id to file
+        if: always()
+        run: |
+          # Write a per-matrix build id file so aggregator can collect all of them
+          echo "${{ steps.codebuild.outputs.build_id }}" > build_id.txt
+          echo "Wrote build id to build_id.txt"
+
+      - name: Upload build id artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.suite.name }}
+          path: build_id.txt
+
+  # === Job 3: Trigger one final run for aggregation and notification ===
+  aggregate-results:
+    name: Aggregate & Notify
+    runs-on: ubuntu-latest
+    needs: [discover-suites, trigger-device-farm-runs]
+    if: always() # Always run this, even if suites fail
+      
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_NON_PROD_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_NON_PROD_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download build id artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build-ids
+
+      - name: Prepare Aggregation Inputs
+        id: prepare-inputs
+        run: |
+          set -euo pipefail
+
+          echo "Listing downloaded build-ids directory"
+          ls -la build-ids || true
+
+          # Unzip all artifacts (download-artifact stores them as zip files)
+          echo "Unzipping artifacts..."
+          mkdir -p build-ids/unzipped
+          for z in build-ids/*.zip; do
+            [ -f "$z" ] || continue
+            echo "Unzipping $z"
+            unzip -q "$z" -d "build-ids/unzipped/$(basename "$z" .zip)"
+          done
+
+          echo "Contents after unzip:"
+          find build-ids/unzipped -maxdepth 3 -type f -print || true
+
+          # Collect build IDs from any build_id.txt files inside the unzipped artifact folders
+          BUILD_IDS=""
+          # for f in build-ids/unzipped/**/build_id.txt; do
+          #   # shellglob may expand to pattern if none found; guard with -f
+          #   if [ -f "$f" ]; then
+          #     id=$(tr -d ' \t\r\n' < "$f")
+          #     echo "Found build id in $f: '$id'"
+          #     if [ -n "$id" ]; then
+          #       if [ -z "$BUILD_IDS" ]; then
+          #         BUILD_IDS="$id"
+          #       else
+          #         BUILD_IDS="${BUILD_IDS},${id}"
+          #       fi
+          #     fi
+          #   fi
+          # done
+
+          # Fallback: also check for plain files if download-artifact returned them unzipped already
+          
+          if [ -z "$BUILD_IDS" ]; then
+            for f in build-ids/*/build_id.txt; do
+              if [ -f "$f" ]; then
+                id=$(tr -d ' \t\r\n' < "$f")
+                echo "Fallback found build id in $f: '$id'"
+                if [ -n "$id" ]; then
+                  if [ -z "$BUILD_IDS" ]; then
+                    BUILD_IDS="$id"
+                  else
+                    BUILD_IDS="${BUILD_IDS},${id}"
+                  fi
+                fi
+              fi
+            done
+          fi
+
+          echo "Final aggregated BUILD_IDS: $BUILD_IDS"
+          echo "build_ids=${BUILD_IDS}" >> $GITHUB_OUTPUT
+
+          # Build TEST_SUITE_NAMES from discovery output (same as before)
+          SUITE_NAMES_MATRIX='${{ needs.discover-suites.outputs.matrix }}'
+          echo "Raw matrix for suite names: $SUITE_NAMES_MATRIX"
+          TEST_SUITE_NAMES=$(echo "$SUITE_NAMES_MATRIX" | jq -r '.suite[].name' | tr '\n' ',' | sed 's/,$//')
+          echo "Passing TEST_SUITE_NAMES to aggregator: $TEST_SUITE_NAMES"
+          echo "test_suite_names=${TEST_SUITE_NAMES}" >> $GITHUB_OUTPUT
+
+      # - name: Download build id artifacts
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     path: build-ids
+
+      # - name: Prepare Aggregation Inputs
+      #   id: prepare-inputs
+      #   run: |
+      #     # 1. Collect all the Build IDs from downloaded artifacts (build-*)
+      #     if compgen -G "build-ids/build-*" > /dev/null; then
+      #       BUILD_IDS=$(cat build-ids/build-* | tr '\n' ',' | sed 's/,$//')
+      #     else
+      #       BUILD_IDS=""
+      #     fi
+      #     echo "Passing BUILD_IDS to aggregator: $BUILD_IDS"
+      #     echo "build_ids=${BUILD_IDS}" >> $GITHUB_OUTPUT
+
+      #     # 2. Get all the suite names from the original discovery job
+      #     SUITE_NAMES_MATRIX='${{ needs.discover-suites.outputs.matrix }}'
+      #     echo "Raw matrix for suite names: $SUITE_NAMES_MATRIX"
+
+      #     TEST_SUITE_NAMES=$(echo "$SUITE_NAMES_MATRIX" | jq -r '.suite[].name' | tr '\n' ',' | sed 's/,$//')
+      #     echo "Passing TEST_SUITE_NAMES to aggregator: $TEST_SUITE_NAMES"
+      #     echo "test_suite_names=${TEST_SUITE_NAMES}" >> $GITHUB_OUTPUT
+
+      - name: Trigger CodeBuild for Aggregation
+        run: |
+          # 3. Define Environment Variables for the Aggregator CodeBuild project
+          BUILD_IDS="${{ steps.prepare-inputs.outputs.build_ids }}"
+          TEST_SUITE_NAMES="${{ steps.prepare-inputs.outputs.test_suite_names }}"
+
+          ENV_VARS=$(cat <<EOF
+          [
+            {"name":"TIMESTAMP", "value":"${{ needs.discover-suites.outputs.timestamp }}", "type":"PLAINTEXT"},
+            {"name":"ENV", "value":"${{ github.event.inputs.environment || 'uat' }}", "type":"PLAINTEXT"},
+            {"name":"GITHUB_SHA", "value":"${{ github.sha }}", "type":"PLAINTEXT"},
+            {"name":"BUCKET_NAME", "value":"${{ env.S3_BUCKET_NAME }}", "type":"PLAINTEXT"},
+            {"name":"SLACK_SECRET_NAME", "value":"${{ env.SLACK_SECRET_NAME }}:slackappurl", "type":"PLAINTEXT"},
+            {"name":"CLOUDFRONT_ID", "value":"E133KGF05VOOTU", "type":"PLAINTEXT"},
+            {"name":"CLOUDFRONT_URL", "value":"https://test-reports.vertofx.dev", "type":"PLAINTEXT"},
+            {"name":"GITHUB_ACTOR", "value":"${{ github.actor }}", "type":"PLAINTEXT"},
+            {"name":"GITHUB_REF_NAME", "value":"${{ github.ref_name }}", "type":"PLAINTEXT"},
+            {"name":"BUILD_IDS", "value":"${BUILD_IDS}", "type":"PLAINTEXT"},
+            {"name":"TEST_SUITE_NAMES", "value":"${TEST_SUITE_NAMES}", "type":"PLAINTEXT"}
+          ]
+          EOF
+          )
+
+          # 4. Start the Aggregator CodeBuild Project
+          echo "Triggering aggregator project: ${{ env.AGGREGATOR_PROJECT_NAME }}"
+          aws codebuild start-build \
+            --project-name ${{ env.AGGREGATOR_PROJECT_NAME }} \
+            --environment-variables-override "$ENV_VARS" \
+            --source-version ${{ github.sha }} \
+            --region ${{ env.AWS_REGION }}

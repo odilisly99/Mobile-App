@@ -1,0 +1,103 @@
+name: Parallel Device Farm Execution
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to run tests on'
+        required: true
+        default: 'uat'
+        type: choice
+        options:
+          - uat
+          - staging
+          - prod
+  push:
+    branches:
+      - parallelteffgstrail # Or your target branch
+
+env:
+  TEST_ENV: ${{ github.event.inputs.environment || 'uat' }}
+  AWS_REGION: eu-central-1 # Or your region
+  # === NAME OF YOUR CODEBUILD PROJECT ===
+  CODEBUILD_PROJECT_NAME: 'device-farm-runner' # Change this
+
+permissions:
+  # Required for aws-actions/configure-aws-credentials
+  id-token: write
+  contents: read
+
+jobs:
+  # Job 1: Discover all test suites (Unchanged)
+  discover-suites:
+    name: Discover Test Suites
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Discover test suites
+        id: set-matrix
+        run: |
+          # This should be your script. Using a placeholder for this example.
+          MATRIX=$(node scripts/discover-test-suites.js matrix)
+          
+          echo "Discovered suites matrix:"
+          echo "${MATRIX}" | jq '.'
+          echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
+
+  # Job 2: Trigger Parallel CodeBuild Jobs
+  trigger-device-farm-runs:
+    name: Trigger Run for ${{ matrix.suite.name }}
+    runs-on: ubuntu-latest
+    needs: discover-suites
+    
+    # === This strategy block fans out the triggers ===
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover-suites.outputs.matrix) }}
+      
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Use your GitHub OIDC Role or secrets
+          aws-access-key-id: ${{ secrets.AWS_NON_PROD_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_NON_PROD_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Trigger CodeBuild for ${{ matrix.suite.name }}
+        run: |
+          SUITE_NAME="${{ matrix.suite.name }}"
+          # This path comes from your original file. Adjust if needed.
+          SUITE_PATH="./tests/${SUITE_NAME}/**/*.js"
+
+          echo "🚀 Triggering CodeBuild project: ${{ env.CODEBUILD_PROJECT_NAME }}"
+          echo "Suite Name: $SUITE_NAME"
+          echo "Suite Path: $SUITE_PATH"
+          
+          # We pass the suite info to CodeBuild as environment variables
+          # CodeBuild will use these to build a dynamic test spec.
+          ENV_VARS=$(cat <<EOF
+          [
+            {"name":"TEST_ENV","value":"${{ env.TEST_ENV }}","type":"PLAINTEXT"},
+            {"name":"TEST_SUITE_NAME","value":"${SUITE_NAME}","type":"PLAINTEXT"},
+            {"name":"TEST_SUITE_PATH","value":"${SUITE_PATH}","type":"PLAINTEXT"},
+            {"name":"GITHUB_SHA","value":"${{ github.sha }}","type":"PLAINTEXT"}
+          ]
+          EOF
+          )
+
+          aws codebuild start-build \
+            --project-name ${{ env.CODEBUILD_PROJECT_NAME }} \
+            --environment-variables-override "$ENV_VARS" \
+            --source-version ${{ github.sha }} \
+            --region ${{ env.AWS_REGION }}

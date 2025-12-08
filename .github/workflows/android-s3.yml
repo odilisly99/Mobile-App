@@ -1,0 +1,59 @@
+name: Direct Artifact Upload to Final S3 Bucket
+permissions:
+  contents: read
+
+on:
+  push:
+    branches:
+      - testrailineyeyeytegration
+  workflow_dispatch:
+
+# Environment variables
+env:
+  AWS_REGION: us-east-1
+  # CRITICAL: This is the ARN of your new IAM Role: github-appium
+  AWS_IAM_ROLE_ARN: arn:aws:iam::928792856470:role/github-appium 
+  
+  # FINAL S3 bucket configuration
+  FINAL_REPORT_BUCKET: test-reports.vertofx.dev # Your S3 bucket name
+  S3_DESTINATION_PATH: hr-appium-reports/latest
+
+jobs:
+  # Assuming the artifact was created in a preceding job named 'create_artifact'
+  upload_report_to_s3:
+    runs-on: ubuntu-latest
+    # Requires permissions for OIDC
+    permissions:
+      id-token: write 
+      contents: read 
+
+    steps:
+      - name: Configure AWS Credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # This input tells AWS which role to assume
+          role-to-assume: ${{ env.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_CODEBUILD_REGION }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # - name: Download Artifact
+      #   # This action downloads the artifact created in the 'create_artifact' job.
+      #   # It creates a directory named 'downloaded_artifact' containing the unzipped contents.
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: test-report-artifact # <<< REPLACE with the actual artifact name
+      #     path: downloaded_artifact
+
+      - name: Upload Artifact to S3
+        run: |
+          LOCAL_PATH=hr-report/
+          S3_URI="s3://${{ env.FINAL_REPORT_BUCKET }}/${{ env.S3_DESTINATION_PATH }}/"
+          
+          echo "Starting sync from $LOCAL_PATH to $S3_URI"
+          
+          # This command now uses the S3 permissions inherited from the 'github-appium' role.
+          aws s3 sync $LOCAL_PATH $S3_URI --delete
+          
+          echo "Successfully uploaded artifact contents to S3."

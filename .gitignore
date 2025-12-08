@@ -1,0 +1,9 @@
+node_modules/
+.env
+playwright-report/
+hr-data/
+test-results/
+allure-reports/
+allure-results/
+allure-results-android/
+allure-results-ios/
