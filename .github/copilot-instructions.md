@@ -71,12 +71,11 @@
 
 `
 const {uatUser} = require("../config/users.js")
-describe("Launch Verto App", () => {
-    it("should launch the Verto app, dismiss biometric popup, and wait for it to load", async () => {
+describe("Launch Rova App", () => {
+    it("should launch the Rova app, dismiss biometric popup, and wait for it to load", async () => {
         // Wait for app to load
         await browser.pause(5000)
-        console.log("Verto app launched successfully.")
-
+        console.log("Rova app launched successfully.")
         // Try to dismiss biometric popup if it appears
         try {
             const usePatternBtn = await $('id=com.samsung.android.biometrics.app.setting:id/button_use_credential')

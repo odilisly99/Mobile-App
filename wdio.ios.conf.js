@@ -1,6 +1,6 @@
 const iosCapabilities = {
     // !!! IMPORTANT: Replace with your iOS app's Bundle ID !!!
-    "appium:bundleId": "com.vertofx.app.uat", 
+    "appium:bundleId": "com.rova.ios", 
     "appium:automationName": "XCUITest",
     "platformName": "iOS",
     "appium:noReset": true,
