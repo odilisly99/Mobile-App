@@ -2,9 +2,10 @@ module.exports = {
   prodUser: {
     email: "remit002@yopmail.com",
     passcode: "123333",
-    phoneNumber: "446546549870",
+    phoneNumber: "6546549870",
     otp: "654321",
-    dob: "05-11-2000"
+    dob: "05-11-2000",
+    pin: "2580"
   },
   signupUser: {
     emailBase: "bashir.alatishe",
@@ -15,6 +16,7 @@ module.exports = {
     state: "FCT (Abuja)",
     lga: "Abaji",
     streetAddress: "14 Abaji Street",
+    landmark: "Near Central Market",
     city: "Abaji",
     passcode: "123456"
   }

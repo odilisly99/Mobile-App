@@ -4,8 +4,33 @@ exports.config = {
     runner: 'local',
     port: 4723,
     specs: [
-        "./tests/Exchange/*.js"  // Run all tests files
+        "./tests/**/*.js"  // Run all tests files
     ],
+    suites: {
+        authentication: [
+            './tests/authentication/signup.js',
+            './tests/authentication/login_test.js'
+        ],
+        beneficiary: [
+            './tests/beneficiary/add_delete_beneficiary.js'
+        ],
+        account: [
+            './tests/account/change_passcode.js',
+            'tests/account/reset_passcode.js',
+            './tests/account/change_transaction_pin.js',
+            './tests/account/reset_transaction_pin.js',
+            './tests/account/update_phone_email.js'
+        ],
+        full_flow: [
+            './tests/authentication/signup.js',
+            './tests/account/change_passcode.js',
+            './tests/account/reset_passcode.js',
+            './tests/account/change_transaction_pin.js',
+            './tests/account/reset_transaction_pin.js',
+            './tests/account/update_phone_email.js',
+            './tests/beneficiary/add_delete_beneficiary.js'
+        ]
+    },
     exclude: [
     ],
     // Maximum parallel instances (adjust based on GitHub runner capacity)

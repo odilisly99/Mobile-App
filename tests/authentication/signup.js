@@ -1,49 +1,69 @@
 const {prodUser, signupUser} = require("../../config/users.js");
-
-const autoAcceptPermissions = async (driver) => {
-    try {
-        // Wait for 3 seconds to see if a permission dialog appears
-        const allowButton = await driver.$('android=new UiSelector().className("android.widget.Button").textMatches("(?i)Allow|(?i)While using the app")');
-        await allowButton.waitForDisplayed({ timeout: 3000 });
-        await allowButton.click();
-        console.log("Auto-accepted system permission.");
-    } catch (error) {
-        // No permission dialog found, which is fine.
-        console.log("No system permission dialog found, continuing...");
-    }
-};
-
-const hideKeyboardIfVisible = async (driver) => {
-    try {
-        if (await driver.isKeyboardShown()) {
-            await driver.hideKeyboard();
-            console.log("Keyboard was visible and is now hidden.");
-        } else {
-            console.log("Keyboard was not visible, no action taken.");
-        }
-    } catch (error) {
-        // Log any errors, but don't fail the test
-        console.warn("Could not check or hide keyboard:", error.message);
-    }
-};
+const { autoAcceptPermissions, hideKeyboardIfVisible, savePageSourceForDebug } = require("../../config/testUtils.js");
 
 describe("User Registration", () => {
-    // Cleanup after each test to ensure fresh start on failure
-    afterEach(async function() {
-        if (this.currentTest.state === 'failed') {
-            console.log("⚠️ Test failed - terminating session for fresh start");
+    // Cleanup before and after each test to ensure fresh start
+    beforeEach(async function() {
+        try {
+            console.log("🔄 Preparing test environment...");
+            // Ensure app is terminated before starting
+            await driver.terminateApp('com.roava.app');
+            await browser.pause(3000);
+            
+            // Reset app to clear any cached data/state
             try {
-                await driver.terminateApp('com.rova.app'); // Replace with actual app package
+                await driver.reset();
+                console.log("✅ App reset completed");
+            } catch (resetError) {
+                console.warn("⚠️ App reset failed, trying alternative approach");
+                // Clear app data as fallback
+                await driver.execute('mobile: clearApp', {appId: 'com.roava.app'});
+                console.log("✅ App data cleared");
+            }
+            
+            await browser.pause(2000);
+            console.log("✅ App terminated and reset, ready for fresh start");
+        } catch (error) {
+            console.warn("⚠️ Error in beforeEach setup:", error.message);
+        }
+    });
+
+    afterEach(async function() {
+        try {
+            console.log("🧹 Cleaning up after test...");
+            await driver.terminateApp('com.roava.app');
+            await browser.pause(2000);
+            console.log("✅ App terminated successfully");
+            
+            if (this.currentTest.state === 'failed') {
+                console.log("⚠️ Test failed - performing additional cleanup");
                 await driver.deleteSession();
                 console.log("✅ Driver session terminated successfully");
-            } catch (error) {
-                console.error("❌ Error terminating session:", error.message);
             }
+        } catch (error) {
+            console.error("❌ Error in cleanup:", error.message);
         }
     });
 
     it("should complete the sign up process", async () => {
         try {
+        // Launch the Rova app first
+        console.log("🚀 Launching Rova app...");
+        await driver.activateApp('com.roava.app');
+        await browser.pause(5000);
+        console.log("✅ Rova app launched");
+
+        // Try to dismiss biometric popup if it appears
+        try {
+            const usePatternBtn = await driver.$('id=com.samsung.android.biometrics.app.setting:id/button_use_credential');
+            if (await usePatternBtn.isDisplayed()) {
+                await driver.back();
+                console.log("✅ Dismissed biometric popup");
+            }
+        } catch (err) {
+            console.log("ℹ️ No biometric popup found");
+        }
+
         await autoAcceptPermissions(driver);
         
         // Generate random digits for unique email
@@ -280,22 +300,7 @@ describe("User Registration", () => {
             console.error("❌ Signup test failed:", error.message);
             
             // Save page source for debugging
-            try {
-                const fs = require('fs');
-                const path = require('path');
-                const pageSource = await driver.getPageSource();
-                const sourcesDir = path.join(__dirname, '../../sources');
-                
-                if (!fs.existsSync(sourcesDir)) {
-                    fs.mkdirSync(sourcesDir, { recursive: true });
-                }
-                
-                const errorFile = path.join(sourcesDir, 'signup_error.xml');
-                fs.writeFileSync(errorFile, pageSource, 'utf8');
-                console.log(`📁 Error page source saved to: ${errorFile}`);
-            } catch (saveError) {
-                console.warn("Could not save error page source:", saveError.message);
-            }
+            await savePageSourceForDebug(driver, 'signup_error');
             
             throw error; // Re-throw to fail the test
         }

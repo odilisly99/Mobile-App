@@ -5,8 +5,8 @@
 // We just need to provide the package/activity to launch.
 let deviceFarmCapabilities = [
     {
-        "appium:appPackage": "com.rova.app",
-        "appium:appActivity": "com.rova.app.MainActivity",
+        "appium:appPackage": "com.roava.app",
+        "appium:appActivity": "com.roava.app.MainActivity",
         "appium:automationName": "UiAutomator2",
         "platformName": "Android",
         "appium:noReset": true, // Match your local config
