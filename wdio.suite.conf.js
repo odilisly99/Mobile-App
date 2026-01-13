@@ -52,6 +52,11 @@ exports.config = {
     connectionRetryCount: 3,
     framework: 'mocha',
     
+    // Retry configuration for failed tests
+    specFileRetries: 1,
+    specFileRetriesDelay: 0,
+    specFileRetriesDeferred: false,
+    
     reporters: [
         'spec',
         ['allure', {

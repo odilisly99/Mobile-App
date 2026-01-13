@@ -139,9 +139,9 @@ describe("Beneficiary Management", () => {
         
         // Step 16: Verify return to beneficiary list is displayed
         await browser.pause(3000);
-        const returnToBeneficiaryListButton = await driver.$("accessibility id:Return to beneficiary list");
+        const returnToBeneficiaryListButton = await driver.$("accessibility id:Return to beneficiaries list");
         await returnToBeneficiaryListButton.waitForDisplayed({ timeout: 10000 });
-        console.log("✅ Verified 'Return to beneficiary list' is displayed");
+        console.log("✅ Verified 'Return to beneficiaries list' is displayed");
         
         console.log("✅ Beneficiary add and delete flow completed successfully");
         

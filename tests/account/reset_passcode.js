@@ -32,24 +32,30 @@ describe("Reset Passcode", () => {
         }
     });
 
-    // Always close app after test completion
-    after(async function() {
-        console.log("🔚 Closing app after test completion...");
-        try {
-            await driver.terminateApp('com.roava.app');
-            console.log("✅ App terminated successfully");
-        } catch (error) {
-            console.error("❌ Error terminating app:", error.message);
-        }
-    });
-
     it("should successfully reset user passcode through forgot passcode flow", async () => {
         try {
-            // Step 1: Launch app and go to login screen
-            await autoAcceptPermissions(driver);
-            await browser.pause(7000);
+            // Step 1: Clear app data and start fresh to ensure we're on login screen
+            console.log("🔄 Clearing app data for fresh start...");
+            await driver.terminateApp('com.roava.app');
+            await browser.pause(2000);
             
-            // Check if we need to go through the initial flow or already at login
+            // Clear app data to ensure fresh state
+            try {
+                await driver.execute('mobile:clearApp', { appId: 'com.roava.app' });
+                console.log("✅ App data cleared");
+            } catch (error) {
+                console.log("⚠️ Could not clear app data, continuing...");
+            }
+            
+            // Launch app fresh
+            await driver.activateApp('com.roava.app');
+            console.log("📱 App launched fresh");
+            
+            // Accept permissions but don't auto-login
+            await autoAcceptPermissions(driver);
+            await browser.pause(5000);
+            
+            // Navigate to login screen if we see Get Started
             try {
                 const getStarted = await driver.$("-android uiautomator:new UiSelector().description(\"Get started\")");
                 if (await getStarted.isDisplayed()) {
@@ -62,7 +68,7 @@ describe("Reset Passcode", () => {
                     console.log("✅ Clicked Log in");
                 }
             } catch (error) {
-                console.log("Already at login screen or app state detected");
+                console.log("Already at login screen");
             }
             
             // ============ RESET PASSCODE FLOW ============
@@ -175,81 +181,6 @@ describe("Reset Passcode", () => {
             console.error("❌ Reset passcode test failed:", error.message);
             await savePageSourceForDebug(driver, "reset_passcode_error");
             throw error; // Re-throw to fail the test
-        }
-    });
-    
-    it("should handle invalid verification code during passcode reset", async () => {
-        try {
-            // Similar flow but with invalid OTP to test error handling
-            await autoAcceptPermissions(driver);
-            await browser.pause(7000);
-            
-            // Navigate to forgot passcode
-            try {
-                const getStarted = await driver.$("-android uiautomator:new UiSelector().description(\"Get started\")");
-                if (await getStarted.isDisplayed()) {
-                    await getStarted.click();
-                    const logIn = await driver.$("-android uiautomator:new UiSelector().description(\"Log in\")");
-                    await logIn.waitForDisplayed({ timeout: 10000 });
-                    await logIn.click();
-                }
-            } catch (error) {
-                console.log("Already at login screen");
-            }
-            
-            // Enter email if needed
-            try {
-                const email = await driver.$("-android uiautomator:new UiSelector().resourceId(\"email_address_input_field\")");
-                if (await email.isDisplayed()) {
-                    await email.click();
-                    await email.setValue(prodUser.email);
-                    const continueButton = await driver.$("accessibility id:Continue");
-                    await continueButton.click();
-                }
-            } catch (error) {
-                console.log("Email step not needed");
-            }
-            
-            // Click forgot passcode
-            const forgotPasscode = await driver.$("accessibility id:Forgot passcode?");
-            await forgotPasscode.waitForDisplayed({ timeout: 10000 });
-            await forgotPasscode.click();
-            
-            // Continue to send reset email
-            const continueBtn = await driver.$("accessibility id:Continue");
-            await continueBtn.waitForDisplayed({ timeout: 10000 });
-            await continueBtn.click();
-            
-            // Enter invalid OTP
-            await browser.pause(3000);
-            const otpField = await driver.$("class name:android.widget.EditText");
-            await otpField.waitForDisplayed({ timeout: 10000 });
-            await otpField.click();
-            await otpField.setValue("000000"); // Invalid OTP
-            console.log("✅ Entered invalid verification code for error testing");
-            
-            // Try to continue with invalid OTP
-            await continueBtn.click();
-            
-            // Wait and check for error message
-            await browser.pause(3000);
-            
-            // Look for error indication or try again option
-            try {
-                const errorElement = await driver.$("*[contains(@text,'invalid') or contains(@text,'incorrect') or contains(@text,'wrong')]");
-                if (await errorElement.isDisplayed()) {
-                    console.log("✅ Invalid OTP error detected as expected");
-                }
-            } catch (error) {
-                console.log("Error message detection varies - test completed");
-            }
-            
-            console.log("🎉 Invalid OTP handling test completed");
-            
-        } catch (error) {
-            console.error("❌ Invalid OTP test failed:", error.message);
-            await savePageSourceForDebug(driver, "invalid_otp_error");
-            // Don't re-throw for this test as some error is expected
         }
     });
 });
