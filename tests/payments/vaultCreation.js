@@ -28,7 +28,7 @@ describe("Vault Creation Test", () => {
             await browser.pause(2000)
 
             // Select interest rate and duration
-            const interestOption = await driver.$("-android uiautomator:new UiSelector().description(\"7.0% AER\\n1 Month\")")
+            const interestOption = await driver.$("-android uiautomator:new UiSelector().description(\"7.0% AER 1 Month\")")
             await interestOption.waitForDisplayed({ timeout: 5000 })
             await interestOption.click()
             console.log("Selected 7.0% AER 1 Month option")
