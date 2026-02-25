@@ -1,0 +1,120 @@
+name: Rova Mobile App Automated Test
+
+on:
+  push:
+    branches: [ develop ]
+  workflow_dispatch:
+    inputs:
+      app_url:
+        description: 'BrowserStack App URL (provided by CodeMagic)'
+        required: false
+        default: ''
+      platform:
+        type: choice
+        description: 'Target Device'
+        options: [android, ios]
+        default: 'android'
+        required: true
+      suite:
+        type: choice
+        description: 'Test Suite to run'
+        options: [all, authentication, beneficiary, account, full_flow]
+        default: 'all'
+        required: true
+      app_env:
+        type: choice
+        description: 'App Environment'
+        options: [UAT, STAGING, PROD]
+        default: 'UAT'
+        required: true
+
+jobs:
+  mobile-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Handle App Source
+        id: app_setup
+        env:
+          BS_USER: ${{ secrets.BROWSERSTACK_USERNAME }}
+          BS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+        run: |
+          # 1. Use CodeMagic URL if provided
+          if [ -n "${{ github.event.inputs.app_url }}" ]; then
+            echo "✅ Using provided App URL: ${{ github.event.inputs.app_url }}"
+            echo "BS_APP_URL=${{ github.event.inputs.app_url }}" >> $GITHUB_ENV
+          
+          # 2. Fallback to local file upload for manual pushes
+          else
+            echo "⚠️ No App URL provided. Checking for local file fallback..."
+            PLATFORM_TYPE="${{ github.event.inputs.platform || 'android' }}"
+            APP_PATH=$([[ "$PLATFORM_TYPE" == "android" ]] && echo "./apk/rova.apk" || echo "./ios/rova.ipa")
+            
+            if [ -f "$APP_PATH" ]; then
+              RESPONSE=$(curl -u "$BS_USER:$BS_KEY" -X POST "https://api-cloud.browserstack.com/app-automate/upload" -F "file=@$APP_PATH")
+              echo "BS_APP_URL=$(echo $RESPONSE | jq -r .app_url)" >> $GITHUB_ENV
+            else
+              echo "❌ ERROR: No App URL found and no binary at $APP_PATH."
+              exit 1
+            fi
+          fi
+
+      - name: Run WebdriverIO
+        id: wdio
+        env:
+          # These map directly to the process.env calls in your new wdio.browserstack.conf.js
+          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+          BROWSERSTACK_APP_URL: ${{ env.BS_APP_URL }}
+          PLATFORM: ${{ github.event.inputs.platform || 'android' }}
+          APP_ENV: ${{ github.event.inputs.app_env || 'UAT' }}
+          BS_BUILD_NAME: "Rova-${{ github.event.inputs.platform || 'android' }}-${{ github.run_number }}"
+        run: |
+          SELECTED_SUITE="${{ github.event.inputs.suite || 'all' }}"
+          # Note: We are now targeting the correct browserstack config file
+          if [ "$SELECTED_SUITE" == "all" ]; then
+            npx wdio run wdio.browserstack.conf.js
+          else
+            npx wdio run wdio.browserstack.conf.js --suite $SELECTED_SUITE
+          fi
+
+      - name: Generate Build Summary
+        if: always()
+        run: |
+          STATUS_ICON=$([[ "${{ job.status }}" == "success" ]] && echo "✅" || echo "❌")
+          PLATFORM_VAL="${{ github.event.inputs.platform || 'android' }}"
+          echo "## $STATUS_ICON BrowserStack Mobile Test Report" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Status** | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Platform** | $PLATFORM_VAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | ${{ github.event.inputs.app_env || 'UAT' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Suite** | ${{ github.event.inputs.suite || 'all' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Build ID** | Rova-$PLATFORM_VAL-${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Session Links" >> $GITHUB_STEP_SUMMARY
+          echo "👉 [View Results on BrowserStack Dashboard](https://app-automate.browserstack.com/dashboard/v2/builds?searchTerm=Rova-$PLATFORM_VAL-${{ github.run_number }})" >> $GITHUB_STEP_SUMMARY
+
+      - name: Slack Notification
+        if: always()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_CHANNEL: mobile-qa-alerts
+          SLACK_COLOR: ${{ job.status == 'success' && 'good' || 'danger' }}
+          SLACK_TITLE: "Rova Mobile Test Results: ${{ job.status }}"
+          SLACK_MESSAGE: |
+            *Platform:* ${{ github.event.inputs.platform || 'android' }}
+            *Build:* Rova-${{ github.event.inputs.platform || 'android' }}-${{ github.run_number }}
+            [View Dashboard](https://app-automate.browserstack.com/dashboard/v2/builds?searchTerm=Rova-${{ github.event.inputs.platform || 'android' }}-${{ github.run_number }})

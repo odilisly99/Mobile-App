@@ -1,21 +1,19 @@
-//require('dotenv').config();
-// Uncomment line 1 if you want to use an environment file 
-
 const baseConfig = require('./wdio.conf.js').config;
-
 const baseAfterTest = baseConfig.afterTest;
 
-const browserStackConfig = {
+exports.config = {
     ...baseConfig,
-    // Hardcoded per request.
-    user: '', //Input browserstack username here
-    key: '',  //Input browserstack access key here
+    
+    // 1. Authentication (Prioritizes CI/CD Envs, allows local fallback)
+    user: process.env.BROWSERSTACK_USERNAME || '', 
+    key: process.env.BROWSERSTACK_ACCESS_KEY || '',
 
     protocol: 'https',
     hostname: 'hub.browserstack.com',
     port: 443,
     path: '/wd/hub',
 
+    // 2. BrowserStack Services & Observability
     services: [[
         'browserstack',
         {
@@ -23,34 +21,39 @@ const browserStackConfig = {
             testObservabilityOptions: {
                 projectName: process.env.BS_PROJECT_NAME || 'Rova Mobile Script',
                 buildName: process.env.BS_BUILD_NAME || 'Nightly regression',
-                buildTag: process.env.BS_BUILD_TAG || 'local-run',
+                buildTag: process.env.BS_BUILD_TAG || 'manual-run',
             },
-            app: '', //Input appID here 
+            // Captures the URL from the CodeMagic -> GitHub bridge
+            app: process.env.BROWSERSTACK_APP_URL || '', 
             browserstackLocal: process.env.BROWSERSTACK_LOCAL === 'true',
         }
     ]],
 
+    // 3. Dynamic Capabilities
     capabilities: [
         {
-            platformName: 'Android',
-            'appium:automationName': 'UiAutomator2',
-            'appium:appPackage': 'com.roava.app',
-            'appium:appActivity': 'com.roava.app.MainActivity',
+            platformName: process.env.PLATFORM === 'ios' ? 'iOS' : 'Android',
+            'appium:automationName': process.env.PLATFORM === 'ios' ? 'XCUITest' : 'UiAutomator2',
+            // Uses Android package or iOS bundle ID depending on platform
+            'appium:appPackage': process.env.PLATFORM === 'ios' ? undefined : 'com.roava.app',
+            'appium:appActivity': process.env.PLATFORM === 'ios' ? undefined : 'com.roava.app.MainActivity',
+            'appium:bundleId': process.env.PLATFORM === 'ios' ? 'com.rova.ios' : undefined,
             'appium:noReset': false,
             'appium:autoGrantPermissions': true,
             'appium:newCommandTimeout': 15000,
             'bstack:options': {
-                deviceName: process.env.BS_DEVICE || 'Google Pixel 9',
-                osVersion: process.env.BS_OS_VERSION || '15.0',
-                projectName: process.env.BS_PROJECT_NAME || 'Rova Mobile Script',
-                buildName: process.env.BS_BUILD_NAME || 'Rova Mobile BrowserStack',
-                sessionName: process.env.BS_SESSION_NAME || 'Full Suite',
+                deviceName: process.env.PLATFORM === 'ios' ? 'iPhone 16 Pro' : 'Google Pixel 9',
+                osVersion: process.env.PLATFORM === 'ios' ? '18' : '15.0',
+                projectName: 'Rova Mobile Script',
+                buildName: process.env.BS_BUILD_NAME,
+                sessionName: process.env.BS_SESSION_NAME || 'Full Suite Run',
                 debug: true,
                 networkLogs: true,
             }
         }
     ],
 
+    // 4. Status Reporting (The Developer's logic to mark Pass/Fail in BS)
     afterTest: async function (test, context, result) {
         if (typeof baseAfterTest === 'function') {
             await baseAfterTest.call(this, test, context, result);
@@ -71,12 +74,7 @@ const browserStackConfig = {
     }
 };
 
-if (!browserStackConfig.user || !browserStackConfig.key) {
-    throw new Error('Missing BrowserStack credentials. Set BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY.');
+// Safety Check for CI/CD
+if (process.env.GITHUB_ACTIONS && (!exports.config.user || !exports.config.key)) {
+    throw new Error('Missing BrowserStack credentials in GitHub Environment.');
 }
-
-if (!browserStackConfig.services?.[0]?.[1]?.app) {
-    throw new Error('Missing app reference in BrowserStack service config.');
-}
-
-exports.config = browserStackConfig;
