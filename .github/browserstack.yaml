@@ -1,4 +1,4 @@
-name: Rova Mobile App Automated TestmAS
+name: Rova Mobile App Automated Test
 
 on:
   push:
