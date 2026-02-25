@@ -29,7 +29,6 @@ This automation framework provides:
 
 
 
-
 ### Mac Prerequisites
 
 #### 1. **System Requirements**
