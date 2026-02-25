@@ -3,6 +3,7 @@ name: Rova Mobile App Automated Test
 on:
   push:
     branches: [ develop, master ]
+    
   workflow_dispatch:
     inputs:
       app_url:
