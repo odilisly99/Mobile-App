@@ -17,8 +17,12 @@ describe("User Registration", () => {
             } catch (resetError) {
                 console.warn("⚠️ App reset failed, trying alternative approach");
                 // Clear app data as fallback
-                await driver.execute('mobile: clearApp', {appId: 'com.roava.app'});
-                console.log("✅ App data cleared");
+                if (process.env.BROWSERSTACK_USERNAME || process.env.BROWSERSTACK_ACCESS_KEY) {
+                    console.log("Skipping mobile: clearApp on BrowserStack; continuing with current app state.");
+                } else {
+                    await driver.execute('mobile: clearApp', {appId: 'com.roava.app'});
+                    console.log("✅ App data cleared");
+                }
             }
             
             await browser.pause(2000);
@@ -37,8 +41,7 @@ describe("User Registration", () => {
             
             if (this.currentTest.state === 'failed') {
                 console.log("⚠️ Test failed - performing additional cleanup");
-                await driver.deleteSession();
-                console.log("✅ Driver session terminated successfully");
+                console.log("Skipping driver.deleteSession(); WDIO will manage the session lifecycle.");
             }
         } catch (error) {
             console.error("❌ Error in cleanup:", error.message);

@@ -24,8 +24,7 @@ describe("Change Transaction PIN", () => {
             
             if (this.currentTest.state === 'failed') {
                 console.log("⚠️ Test failed - performing additional cleanup");
-                await driver.deleteSession();
-                console.log("✅ Driver session terminated successfully");
+                console.log("Skipping driver.deleteSession(); WDIO will manage the session lifecycle.");
             }
         } catch (error) {
             console.error("❌ Error in cleanup:", error.message);

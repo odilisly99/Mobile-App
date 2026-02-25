@@ -24,8 +24,7 @@ describe("Reset Passcode", () => {
             
             if (this.currentTest.state === 'failed') {
                 console.log("⚠️ Test failed - performing additional cleanup");
-                await driver.deleteSession();
-                console.log("✅ Driver session terminated successfully");
+                console.log("Skipping driver.deleteSession(); WDIO will manage the session lifecycle.");
             }
         } catch (error) {
             console.error("❌ Error in cleanup:", error.message);
@@ -41,8 +40,12 @@ describe("Reset Passcode", () => {
             
             // Clear app data to ensure fresh state
             try {
-                await driver.execute('mobile:clearApp', { appId: 'com.roava.app' });
-                console.log("✅ App data cleared");
+                if (process.env.BROWSERSTACK_USERNAME || process.env.BROWSERSTACK_ACCESS_KEY) {
+                    console.log("Skipping mobile:clearApp on BrowserStack; continuing with current app state.");
+                } else {
+                    await driver.execute('mobile:clearApp', { appId: 'com.roava.app' });
+                    console.log("✅ App data cleared");
+                }
             } catch (error) {
                 console.log("⚠️ Could not clear app data, continuing...");
             }
