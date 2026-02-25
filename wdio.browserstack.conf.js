@@ -78,3 +78,4 @@ exports.config = {
 if (process.env.GITHUB_ACTIONS && (!exports.config.user || !exports.config.key)) {
     throw new Error('Missing BrowserStack credentials in GitHub Environment.');
 }
+
