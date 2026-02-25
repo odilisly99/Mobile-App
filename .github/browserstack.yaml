@@ -1,8 +1,8 @@
 name: Rova Mobile App Automated TestmAS
 
 on:
-#   push:
-#     branches: [ master ]
+  push:
+    branches: [ develop, master ]
   workflow_dispatch:
     inputs:
       app_url:
