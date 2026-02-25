@@ -26,7 +26,7 @@ This automation framework provides:
 - ✅ Error handling and debugging capabilities
 - ✅ CI/CD ready configurations
 
-## Prerequisites
+
 
 ### Mac Prerequisites
 
